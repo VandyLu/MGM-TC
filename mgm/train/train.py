@@ -517,7 +517,13 @@ def preprocess_llama_3(
     has_image: bool = False
 ) -> Dict:
     conv = conversation_lib.default_conversation.copy()
-    roles = {"human": conv.roles[0], "gpt": conv.roles[1]}
+    roles = {"human": conv.roles[0], "gpt": conv.roles[1], 'function response': conv.roles[0]}
+
+    if sources[0][0]['from'] == 'system':
+        system_prompt = sources[0][0]['value']
+        sources[0].pop(0)
+    else:
+        system_prompt = None
 
     # Apply prompt templates
     conversations = []
@@ -531,8 +537,9 @@ def preprocess_llama_3(
             role = roles[sentence["from"]]
             assert role == conv.roles[j % 2], f"{i}"
             conv.append_message(role, sentence["value"])
-        conversations.append(conv.get_prompt())
+        conversations.append(conv.get_prompt(system_prompt=system_prompt))
 
+    # print(conversations)
     # Tokenize conversations
 
     if has_image:
@@ -886,15 +893,16 @@ class LazySupervisedDataset(Dataset):
 
     def __getitem__(self, i) -> Dict[str, torch.Tensor]:
         attempt, max_attempt = 0, 10
-        while attempt < max_attempt:
-            try:
-                # sample an item
-                data_dict = self._sample_item(i)
-                break
-            except:
-                attempt += 1
-                print(f"Error in loading {i}, retrying...")
-                i = random.randint(0, len(self.list_data_dict)-1)
+        # while attempt < max_attempt:
+        #     try:
+        #         # sample an item
+        #         data_dict = self._sample_item(i)
+        #         break
+        #     except:
+        #         attempt += 1
+        #         print(f"Error in loading {i}, retrying...")
+        #         i = random.randint(0, len(self.list_data_dict)-1)
+        data_dict = self._sample_item(i)
 
         return data_dict
 
@@ -959,6 +967,13 @@ class LazySupervisedDataset(Dataset):
             sources = copy.deepcopy([e["conversations"] for e in sources])
                 
         has_image = ('image' in self.list_data_dict[i])
+        sources = copy.deepcopy(sources)
+        if 'system' in self.list_data_dict[i]:
+            system_prompt = self.list_data_dict[i]['system']
+            conv = sources[0]
+            conv.insert(0, {'from': 'system', 'value': system_prompt})
+            sources[0] = conv
+
         data_dict = preprocess(
             sources,
             self.tokenizer,

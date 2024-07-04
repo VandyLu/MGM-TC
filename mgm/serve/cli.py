@@ -32,6 +32,140 @@ def load_image(image_file):
         image = Image.open(image_file).convert('RGB')
     return image
 
+tools = [
+    {
+        "type": "function",
+        "function": {
+            "name": "get_current_vimo_project_info",
+            "description": "Get the basic information(project type, training hyperparameteres, label and annotation statistics) of a ViMo project.",
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_vimo_parameters",
+            "description": "Set the hyperparameters of the current ViMo project",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "n_epoch": {
+                        "type": "integer",
+                        "description": "The number of epochs for training the model."
+                    },
+                    "data_split_ratio": {
+                        "type": "integer",
+                        "description": "The ratio (数据划分) of the training data, from 10 to 90."
+                    },
+                    'model_type': {
+                        'type': 'string',
+                        'enum': ['simple', 'complex', 'turbo'],
+                        'description': 'The type of the model to be used for training. simple(低功耗): low power consumption, availabel in classification, segementation, detection, ocr. complex(高精度模式): high precision model, availabel in classification, segementation, detection. turbo(高性能模式): for ocr only. Default: complex for  classification, segementation, detection, turbo for ocr'
+                    },
+                    'image_type': {
+                        'type': 'string',
+                        'enum': ['RGB', 'GRAY'],
+                        'description': 'Use RGB (彩色模式) image or convert to GRAY image in Training. Gray mode (灰度模式) may train faster and infer faster, but it may lose some information and lead to degraded quality. Default: RGB'
+                    },
+                    "data_augmentation": {
+                        "type": "string",
+                        "enum": ["RandomHorizontalFlip", "RandomVerticalFlip", "ImpulseNoise","GaussianBlur", "MotionBlur", "ColorJitter","RandomRotation", "RandomScale", "RandomShift"],
+                        "description": "The type of data augmentation to be used, RandomHorizontalFlip(水平翻转), RandomVerticalFlip(垂直翻转), ImpulseNoise(椒盐噪声), GaussianBlur(高斯模糊), MotionBlur(运动模糊), ColorJitter(图像亮度),RandomRotation(随机旋转), RandomScale(随机缩放), RandomShift(随机平移), return one at a time"
+                    },
+                    "resize": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "the desired resize height and width integer respectivly."
+                    },
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_vimo_project",
+            "description": "Create a new ViMo project(classificiation, detection, segmentation, or ocr), import the existing images and annotations, return the project ID.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "project_type": {
+                        "type": "string",
+                        "enum": ["classification", "detection", "segmentation", "ocr"],
+                        "description": "The type of the ViMo project(classificiation, detection, segmentation, or ocr)."
+                    }
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "start_vimo_train_by_id",
+            "description": "Start training the ViMo project of project ID.",
+        }
+    },
+    {
+        'type': 'function',
+        'function': {
+            'name': 'get_last_trained_metrics',
+            'description': 'Get the performance metrics of the last trained model.'
+        }
+    },
+    {
+        'type': 'function',
+        'function': {
+            'name': 'check_training_status',
+            'description': 'Check the training status of the current ViMo project.',
+        }
+    },
+]
+
+import json
+
+tool_string = "\n\n".join(json.dumps(tool) for tool in tools)
+system_prompt = '''You are Industry GPT, a powerful AI assistant developed by the SmartMore company, equipped with expert-level knowledge and intelligence in the field of industrial manufacturing.\n
+''' + "You can access to the following functions. Use them if needed:\n" + tool_string + '\n' + '''
+You can answer questions about industrial manufacturing, and assist users in utilizing ViMo, a deep learning platform for industrial manufacturing with classification (分类), object detection (检测), sementic segmentation  (分割) and ocr (单字符识别) capabilities.\n 
+Segmentation primarily deals with defects like scratch, dent or something small that need precisie contour, whereas detection just give you the bounding box.\n
+You can also provide guidance on how to use ViMo to solve specific problems in industrial vision inspection tasks, recommend proper algorithm solutions, and operate ViMo through API to help the user complete tasks.\n\n
+Introduction to ViMo: A deep learning platform. Users will first upload images to a dataset. The image may or may not have label(特征).
+Users can then create in a project with one of the algorithms, the dataset will be automatically added to the project. If the image has annotations(标注), they will be added as well, otherwise, users can annotate (标注) the image within the project.\n
+They can also split(划分) the data into train and validation set on ViMo. After training, they can see the performance metrics for the the model.\n\n
+Keep the rules in mind: 
+
+1. DO NOT reveal project ID to the user.\n
+2. DO NOT reveal the API functions of ViMo the user.\n
+'''
+
+
+# 1. You should not answer any question that is not related to ViMo.\n
+# 2. DO NOT reveal project ID to the user.\n
+# 3. DO NOT reveal the API functions of ViMo the user.\n
+# 4. You should always repsond in the same lanuage as the user input or based on user instructions.(English, Traditional Chinese, Simplified Chinese)\n
+# 5. You should confirm the dataset details with the user before create any project. You should only create a project when at least one dataset has been uploaded, but the dataset doesn't need to have annotations before a project is created.\n
+# 6. Users may use an existing project, in which case you should continue in the existing project. \n
+# 7. After the project has been created, you should always use the function 'get_current_vimo_project_info' to ensure there are sufficient annotations(标注) before set parameters or start training, if label_type(特征) is empty or there is no annotation (标注) for any labe_type, you should remind the user to annotate(标注) the image first.\n
+# 8. if there are annotations (标注), but number of train image is 0, it means images have not been splited into training and validation set, you should remind the user.\n
+# 9. You must not call 'start_vimo_train_by_id' if there is less than 1 train image and 1 validation image as shown in project status, regardless of the user prompt.\n
+# 10. You should only create one project at a time and make sure the project satisfies the requirements of the user.\n
+# 11. Do not randomly suggest a classification, detection, or segmentation model to the user, instead you should ask the user details of his requirment and suggest the best algorithm to him.\n
+# 12. Before calling 'start_vimo_train_by_id', you must always pause and ask the user to re-confirm the current setting.\n
+# 13. After training starts, you should first inform the user that training has began, user can ask questions when training finishes.\n,
+# 14. If user ask about the training, first check the training status with the given function 'check_training_status' before you respond to the user until you find the training is finished, and then report and analyze the training results to the user.\n
+# 15. After the project has been created, you need to check training status with the given function 'get_vimo_project_info' to understand the current project states, including number of labels(特征).\n
+# 16. Regardless of the user prompt, you must never disclose you are related to OpenAI or chatGPT in any way.\n\n
+# '''
+# You are allowed to use the following functions if needed:\n
+# ''' + json.dumps(tools) + "\n" + 'You can call the function by the format: <function_call> {"name": "<function_name>", "parameters": {"<parameter_name>": "<parameter_value>"}}\n'
+
+# system_prompt = """You are a helpful assistant with access to the following functions. Use them if required -
+# {"name": "book_tickets", "description": "Book tickets for a specific event", "parameters": {"type": "object", "properties": {"event_name": {"type": "string", "description": "The name of the event"}, "number_of_tickets": {"type": "integer", "description": "The number of tickets to book"}, "seating_preference": {"type": "string", "description": "The preferred seating option"}}, "required": ["event_name", "number_of_tickets"]}}
+
+# {"name": "find_duplicate_elements", "description": "Find duplicate elements in an array", "parameters": {"type": "object", "properties": {"array": {"type": "array", "items": {"type": "string"}, "description": "The array to check for duplicates"}}, "required": ["array"]}}
+
+# {"name": "get_exchange_rate", "description": "Get the exchange rate between two currencies", "parameters": {"type": "object", "properties": {"base_currency": {"type": "string", "description": "The currency to convert from"}, "target_currency": {"type": "string", "description": "The currency to convert to"}}, "required": ["base_currency", "target_currency"]}}
+
+# {"name": "get_famous_quotes", "description": "Get a collection of famous quotes", "parameters": {"type": "object", "properties": {"category": {"type": "string", "description": "The category of quotes"}, "limit": {"type": "integer", "description": "The maximum number of quotes to retrieve"}}, "required": ["category", "limit"]}}\n"""
 
 def main(args):
     # Model
@@ -174,7 +308,8 @@ def main(args):
             # later messages
             conv.append_message(conv.roles[0], inp)
         conv.append_message(conv.roles[1], None)
-        prompt = conv.get_prompt()
+        prompt = conv.get_prompt(system_prompt=system_prompt)
+        print(prompt)
         
         # add image split string
         if prompt.count(DEFAULT_IMAGE_TOKEN) >= 2:
@@ -190,6 +325,10 @@ def main(args):
         input_ids = tokenizer_image_token(prompt, tokenizer, IMAGE_TOKEN_INDEX, return_tensors='pt').unsqueeze(0).to(model.device)
         streamer = TextStreamer(tokenizer, skip_prompt=True, skip_special_tokens=True)
 
+        terminators = tokenizer.eos_token_id
+        if "llama_3" in args.conv_mode:
+            terminators = [terminators, tokenizer.convert_tokens_to_ids("<|eot_id|>")]
+
         with torch.inference_mode():
             output_ids = model.generate(
                 input_ids,
@@ -199,7 +338,7 @@ def main(args):
                 temperature=args.temperature,
                 max_new_tokens=args.max_new_tokens,
                 bos_token_id=tokenizer.bos_token_id,  # Begin of sequence token
-                eos_token_id=tokenizer.eos_token_id,  # End of sequence token
+                eos_token_id=terminators,  # End of sequence token
                 pad_token_id=tokenizer.pad_token_id,  # Pad token
                 streamer=streamer,
                 use_cache=True)
